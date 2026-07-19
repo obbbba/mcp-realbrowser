@@ -28,11 +28,12 @@ function getChromePaths(): { os: string; paths: string[] } {
     return {
       os: "Windows",
       paths: [
+        // Edge first — pre-installed on Windows 11, no extra install needed
+        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+        "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
         "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
         "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
         path.join(process.env.LOCALAPPDATA || "", "Google\\Chrome\\Application\\chrome.exe"),
-        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-        "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
         path.join(process.env.LOCALAPPDATA || "", "BraveSoftware\\Brave-Browser\\Application\\brave.exe"),
       ],
     };
@@ -92,7 +93,7 @@ function checkBrowserRunning(): CheckResult {
   try {
     let cmd: string;
     if (process.platform === "win32") {
-      cmd = 'tasklist /FI "IMAGENAME eq chrome.exe" /FO CSV 2>NUL';
+      cmd = 'tasklist /FI "IMAGENAME eq chrome.exe" /FO CSV 2>NUL & tasklist /FI "IMAGENAME eq msedge.exe" /FO CSV 2>NUL';
     } else {
       cmd = 'pgrep -a -i "chrome|chromium|edge|brave" 2>/dev/null';
     }
@@ -163,11 +164,11 @@ async function checkCDPPort(): Promise<CheckResult> {
           pass: false,
           detail: `Port ${CDP_PORT} is not accepting connections.`,
           fix: [
-            `1. Make sure Chrome is running with --remote-debugging-port=${CDP_PORT}`,
-            `2. If Chrome IS running, kill ALL Chrome processes first, then re-launch:`,
-            `   - Windows: taskkill /F /IM chrome.exe`,
+            `1. Make sure browser is running with --remote-debugging-port=${CDP_PORT}`,
+            `2. If browser IS running, kill ALL processes first, then re-launch:`,
+            `   - Windows: taskkill /F /IM msedge.exe & taskkill /F /IM chrome.exe`,
             `   - Mac:     pkill -f "Google Chrome"`,
-            `3. Then run: scripts/launch-chrome.bat (or .sh)`,
+            `3. Then run: scripts/launch-edge.bat (or launch-chrome.bat)`,
           ].join("\n"),
         });
       } else {
@@ -242,9 +243,9 @@ function checkChromeFlagConflicts(): CheckResult {
     let cmd: string;
     if (process.platform === "win32") {
       cmd =
-        'wmic process where "name=\'chrome.exe\'" get commandline /VALUE 2>NUL';
+        'wmic process where "name=\'chrome.exe\' or name=\'msedge.exe\'" get commandline /VALUE 2>NUL';
     } else {
-      cmd = 'ps aux | grep -i "[c]hrome" 2>/dev/null';
+      cmd = 'ps aux | grep -i "[c]hrome\|[e]dge" 2>/dev/null';
     }
 
     const output = execSync(cmd, { encoding: "utf-8", timeout: 5000 });
@@ -252,36 +253,36 @@ function checkChromeFlagConflicts(): CheckResult {
     if (output.includes("--remote-debugging-port")) {
       const port = output.match(/--remote-debugging-port[= ](\d+)/)?.[1] || "unknown";
       return {
-        label: "Chrome debug flag",
+        label: "Browser debug flag",
         pass: port === String(CDP_PORT),
         detail:
           port === String(CDP_PORT)
-            ? `Chrome running with --remote-debugging-port=${CDP_PORT} ✅`
-            : `Chrome has debugging port but on ${port}, not ${CDP_PORT}`,
+            ? `Browser running with --remote-debugging-port=${CDP_PORT} ✅`
+            : `Browser has debugging port on ${port}, not ${CDP_PORT}`,
         fix:
           port !== String(CDP_PORT)
-            ? `Re-launch Chrome with --remote-debugging-port=${CDP_PORT} instead of ${port}`
+            ? `Re-launch browser with --remote-debugging-port=${CDP_PORT} instead of ${port}`
             : undefined,
       };
     }
 
     return {
-      label: "Chrome debug flag",
+      label: "Browser debug flag",
       pass: false,
-      detail: "Chrome is running but WITHOUT --remote-debugging-port flag.",
+      detail: "Browser is running but WITHOUT --remote-debugging-port flag.",
       fix: [
-        "This is the #1 issue! Chrome must be launched with the debugging flag.",
-        `1. Close ALL Chrome windows completely (check system tray too)`,
-        `2. Run: scripts/launch-chrome.bat (Windows) or scripts/launch-chrome.sh`,
-        `3. Or manually: chrome --remote-debugging-port=${CDP_PORT}`,
+        "This is the #1 issue! Browser must be launched with the debugging flag.",
+        `1. Close ALL browser windows completely (check system tray too)`,
+        `2. Run: scripts/launch-edge.bat or scripts/launch-chrome.bat`,
+        `3. Or manually: msedge/chrome --remote-debugging-port=${CDP_PORT}`,
       ].join("\n"),
     };
   } catch {
     return {
-      label: "Chrome debug flag",
+      label: "Browser debug flag",
       pass: false,
-      detail: "Could not check Chrome command-line flags.",
-      fix: "Make sure Chrome is launched with --remote-debugging-port=9222",
+      detail: "Could not check browser command-line flags.",
+      fix: "Make sure browser is launched with --remote-debugging-port=9222",
     };
   }
 }
@@ -298,7 +299,7 @@ export async function runDoctor(opts?: { fix?: boolean }): Promise<boolean> {
     console.log("   Auto-fix mode: will kill stale browsers and launch a new one.\n");
   } else {
     console.log("🩺 MCP-RealBrowser Doctor\n");
-    console.log(`   Tip: run with --fix to auto-kill and re-launch Chrome.\n`);
+    console.log(`   Tip: run with --fix to auto-kill and re-launch browser.\n`);
   }
   console.log(`   Platform: ${process.platform} ${process.arch}`);
   console.log(`   CDP Port: ${CDP_PORT}\n`);
@@ -365,7 +366,7 @@ async function autoFix(checks: CheckResult[]): Promise<boolean> {
   console.log("   Killing browser processes...");
   try {
     if (process.platform === "win32") {
-      execSync("taskkill /F /IM chrome.exe 2>NUL", { timeout: 5000 });
+      execSync("taskkill /F /IM msedge.exe 2>NUL & taskkill /F /IM chrome.exe 2>NUL", { timeout: 5000 });
       execSync("taskkill /F /IM msedge.exe 2>NUL", { timeout: 5000 });
       execSync("taskkill /F /IM brave.exe 2>NUL", { timeout: 5000 });
     } else {
