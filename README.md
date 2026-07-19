@@ -243,17 +243,6 @@ chrome --remote-debugging-port=9222 --user-data-dir="%TEMP%\chrome-mcp-profile"
 
 ---
 
-## Roadmap
-
-- [x] Phase 1: Chrome/CDP — 14 tools + `--doctor` diagnostics
-- [ ] Phase 1.5: Multi-tab support (list tabs, switch tab)
-- [ ] Phase 2: Firefox via WebDriver BiDi
-- [ ] Phase 3: Safari via WebDriver
-- [ ] Phase 4: Visual element selection (click by screenshot coordinate)
-- [ ] Phase 5: Session recording + replay
-
----
-
 ## Contributing
 
 Pull requests welcome! This is a young project — there's plenty to improve.
