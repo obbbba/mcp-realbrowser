@@ -16,6 +16,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { CDPConnection } from "./cdp-connection.js";
+import { runDoctor } from "./doctor.js";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -227,12 +228,110 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
+// Tool 10: go_back
+// ---------------------------------------------------------------------------
+
+server.tool(
+  "go_back",
+  "Navigate back to the previous page in browser history.",
+  {},
+  async () => {
+    const result = await cdp.goBack();
+    return {
+      content: [{ type: "text", text: `⬅️ ${result}` }],
+    };
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool 11: go_forward
+// ---------------------------------------------------------------------------
+
+server.tool(
+  "go_forward",
+  "Navigate forward in browser history.",
+  {},
+  async () => {
+    const result = await cdp.goForward();
+    return {
+      content: [{ type: "text", text: `➡️ ${result}` }],
+    };
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool 12: reload
+// ---------------------------------------------------------------------------
+
+server.tool(
+  "reload",
+  "Reload the current page.",
+  {},
+  async () => {
+    const result = await cdp.reload();
+    return {
+      content: [{ type: "text", text: `🔄 ${result}` }],
+    };
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool 13: hover
+// ---------------------------------------------------------------------------
+
+server.tool(
+  "hover",
+  "Hover the mouse over an element. Useful for dropdown menus, tooltips, and hover-reveal content.",
+  {
+    target: z
+      .string()
+      .describe("CSS selector, visible text, or button name to hover over"),
+  },
+  async ({ target }) => {
+    const result = await cdp.hover(target);
+    return {
+      content: [{ type: "text", text: `✅ Hovered: ${result}` }],
+    };
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Tool 14: wait_for_text
+// ---------------------------------------------------------------------------
+
+server.tool(
+  "wait_for_text",
+  "Wait for specific text to appear on the page. Use this after clicking a button that triggers a page update — it ensures the new content has loaded before you snapshot or extract.",
+  {
+    text: z.string().describe("Text to wait for on the page"),
+    timeout: z
+      .number()
+      .optional()
+      .describe("Max wait time in milliseconds (default: 10000 = 10s)"),
+  },
+  async ({ text, timeout }) => {
+    const result = await cdp.waitForText(text, timeout);
+    return {
+      content: [{ type: "text", text: `⏳ ${result}` }],
+    };
+  }
+);
+
+// ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
 
 async function main() {
+  // ---------------------------------------------------------------------------
+  // --doctor: diagnostic mode (mcp-realbrowser --doctor)
+  // ---------------------------------------------------------------------------
+  if (process.argv.includes("--doctor")) {
+    const ok = await runDoctor();
+    process.exit(ok ? 0 : 1);
+  }
+
   console.error(`┌─────────────────────────────────────────────┐`);
-  console.error(`│   🖥️  MCP-RealBrowser v1.0.0                  │`);
+  console.error(`│   🖥️  MCP-RealBrowser v1.1.0                  │`);
   console.error(`│   Real Chrome • Real Sessions • Real Work    │`);
   console.error(`└─────────────────────────────────────────────┘`);
   console.error(``);
@@ -258,8 +357,8 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  console.error(`[realbrowser] ✅ Ready — 9 tools registered.`);
-  console.error(`[realbrowser] 📋 Tools: navigate, snapshot, click, type, press_key, screenshot, extract, scroll, fill`);
+  console.error(`[realbrowser] ✅ Ready — 14 tools registered.`);
+  console.error(`[realbrowser] 📋 Tools: navigate, snapshot, click, type, press_key, screenshot, extract, scroll, fill, go_back, go_forward, reload, hover, wait_for_text`);
 }
 
 main().catch((error) => {

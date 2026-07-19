@@ -384,6 +384,101 @@ export class CDPConnection {
   }
 
   // ---------------------------------------------------------------------------
+  // Tool: go_back
+  // ---------------------------------------------------------------------------
+
+  async goBack(): Promise<string> {
+    const page = await this.ensurePage();
+    await page.goBack({ waitUntil: "domcontentloaded", timeout: 15000 });
+    return `Back to: ${page.url()}`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tool: go_forward
+  // ---------------------------------------------------------------------------
+
+  async goForward(): Promise<string> {
+    const page = await this.ensurePage();
+    await page.goForward({ waitUntil: "domcontentloaded", timeout: 15000 });
+    return `Forward to: ${page.url()}`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tool: reload
+  // ---------------------------------------------------------------------------
+
+  async reload(): Promise<string> {
+    const page = await this.ensurePage();
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
+    return `Reloaded: ${page.url()}`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tool: hover
+  // ---------------------------------------------------------------------------
+
+  async hover(target: string): Promise<string> {
+    const page = await this.ensurePage();
+
+    const strategies: Array<{ name: string; fn: () => Promise<void> }> = [
+      {
+        name: "CSS selector",
+        fn: async () => {
+          await page.hover(target, { timeout: 5000 });
+        },
+      },
+      {
+        name: "text match",
+        fn: async () => {
+          await page.getByText(target, { exact: false }).first().hover({ timeout: 3000 });
+        },
+      },
+      {
+        name: "role",
+        fn: async () => {
+          await page.getByRole("button", { name: target }).hover({ timeout: 3000 });
+        },
+      },
+    ];
+
+    for (const strategy of strategies) {
+      try {
+        await strategy.fn();
+        await page.waitForTimeout(200);
+        return `${strategy.name}: "${target}"`;
+      } catch {
+        continue;
+      }
+    }
+
+    throw new Error(`Could not hover "${target}". Try 'snapshot' first.`);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tool: wait_for_text
+  // ---------------------------------------------------------------------------
+
+  async waitForText(text: string, timeoutMs: number = 10000): Promise<string> {
+    const page = await this.ensurePage();
+    const start = Date.now();
+
+    try {
+      await page.waitForFunction(
+        (t) => document.body?.innerText?.includes(t),
+        text,
+        { timeout: timeoutMs, polling: 500 }
+      );
+      const elapsed = Date.now() - start;
+      return `Text "${text}" appeared after ${elapsed}ms`;
+    } catch {
+      throw new Error(
+        `Timed out after ${timeoutMs}ms waiting for text: "${text}". ` +
+          `Current page: ${page.url()}`
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Tool: fill_form (batch fill multiple fields)
   // ---------------------------------------------------------------------------
 

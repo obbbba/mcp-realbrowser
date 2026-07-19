@@ -8,6 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-1.0-purple)](https://modelcontextprotocol.io/)
+[![CI](https://github.com/obbbba/mcp-realbrowser/actions/workflows/ci.yml/badge.svg)](https://github.com/obbbba/mcp-realbrowser/actions/workflows/ci.yml)
 
 ---
 
@@ -55,7 +56,16 @@ npm install
 npm run build
 ```
 
-### 2. Launch Chrome with debugging
+### 2. Diagnose (optional but recommended)
+
+```bash
+npm run build
+node dist/index.js --doctor
+```
+
+This checks: Chrome installed? Running with CDP? Port available? Gives specific fix instructions for each issue.
+
+### 3. Launch Chrome with debugging
 
 **Windows:**
 ```bat
@@ -80,7 +90,7 @@ Or manually:
 google-chrome --remote-debugging-port=9222
 ```
 
-### 3. Configure Claude Code
+### 4. Configure Claude Code
 
 Add to your Claude Code MCP config (`~/.claude/claude.json` or project `.claude/settings.json`):
 
@@ -113,7 +123,7 @@ Or during development:
 }
 ```
 
-### 4. Use it
+### 5. Use it
 
 Start Claude Code and try:
 ```
@@ -124,19 +134,24 @@ Start Claude Code and try:
 
 ---
 
-## Tools (9)
+## Tools (14)
 
 | Tool | What it does |
 |------|-------------|
 | `navigate(url)` | Open any URL in the current tab |
-| `snapshot()` | Get accessibility tree — AI's "eyes" on the page |
-| `click(target)` | Click by selector, text, role, placeholder, or label |
-| `type(text)` | Type into the focused input |
+| `snapshot()` | Scan page DOM — returns all interactive elements with roles and labels |
+| `click(target)` | Click by CSS selector, text, role, placeholder, or label (6 strategies) |
+| `type(text)` | Type into the focused input with human-like delay |
 | `press_key(key)` | Press Enter, Tab, Escape, arrows, etc. |
 | `screenshot()` | Take a viewport screenshot (PNG, base64) |
 | `extract()` | Get all visible text (up to 15K chars) |
-| `scroll(direction, amount?)` | Scroll up/down |
-| `fill(field, value)` | Fill an input by placeholder/label |
+| `scroll(direction, amount?)` | Scroll up/down, returns scroll position |
+| `fill(field, value)` | Fill an input by placeholder or label |
+| `go_back()` | Navigate back in browser history |
+| `go_forward()` | Navigate forward in browser history |
+| `reload()` | Reload the current page |
+| `hover(target)` | Hover over an element (dropdowns, tooltips) |
+| `wait_for_text(text, timeout?)` | Wait for text to appear after an action |
 
 ---
 
@@ -149,7 +164,7 @@ Start Claude Code and try:
 └──────────────┘                    └──────────────────┘                  └──────────────┘
                                            │
                                            │  chromium.connectOverCDP()
-                                           │  page.accessibility.snapshot()
+                                           │  DOM snapshot (interactive elements)
                                            │  page.screenshot()
                                            │  page.keyboard.type()
                                            ▼
@@ -160,9 +175,56 @@ Start Claude Code and try:
 
 Key design decisions:
 - **CDP over launching**: Connects to YOUR browser, not a fresh one
-- **Accessibility tree for vision**: Structured, fast, AI-friendly (30KB vs 2MB screenshot)
-- **Screenshot as fallback**: For visual pages where a11y tree isn't enough
+- **DOM snapshot for vision**: Structured, fast, 250-element limit keeps context manageable
+- **Screenshot as fallback**: For visual pages where DOM structure isn't enough
 - **Disconnect ≠ Close**: Shutting down the MCP server never closes your browser
+- **--doctor mode**: Diagnose Chrome/CDP issues before starting the server
+
+---
+
+## Troubleshooting
+
+### "CDP port not accepting connections" (most common)
+
+This means Chrome is running but **without** the `--remote-debugging-port` flag.
+
+**Fix:**
+```bash
+# 1. Kill ALL Chrome processes (yes, all of them — system tray too)
+# Windows:
+taskkill /F /IM chrome.exe
+
+# Mac:
+pkill -f "Google Chrome"
+
+# 2. Re-launch with the debugging flag
+scripts/launch-chrome.bat   # Windows
+./scripts/launch-chrome.sh  # Mac/Linux
+
+# 3. Verify the port is open
+curl http://localhost:9222/json/version
+```
+
+### "What port is my Chrome on?"
+
+Run `--doctor` to diagnose all common issues:
+```bash
+node dist/index.js --doctor
+```
+
+### Blank page / no content
+
+Some sites block automation. Try:
+1. Use `screenshot` instead of `snapshot` for visual pages
+2. Use `extract` for text-heavy pages
+3. Some SPAs need `wait_for_text` after navigation
+
+### Chrome starts but ignores the flag
+
+Chrome may pick up an existing session. Use a separate profile:
+```bash
+chrome --remote-debugging-port=9222 --user-data-dir="%TEMP%\chrome-mcp-profile"
+```
 
 ---
 
@@ -183,7 +245,7 @@ Key design decisions:
 
 ## Roadmap
 
-- [x] Phase 1: Chrome/CDP — 9 core tools
+- [x] Phase 1: Chrome/CDP — 14 tools + `--doctor` diagnostics
 - [ ] Phase 1.5: Multi-tab support (list tabs, switch tab)
 - [ ] Phase 2: Firefox via WebDriver BiDi
 - [ ] Phase 3: Safari via WebDriver
@@ -226,8 +288,11 @@ If you find this useful, a ⭐ on GitHub helps a ton — it tells others this pr
 
 **快速开始：**
 1. 克隆项目 → `npm install` → `npm run build`
-2. 关闭所有 Chrome 窗口，运行 `scripts/launch-chrome.bat`（Windows）
-3. 在 Claude Code 配置中添加 MCP Server（见上方 JSON 配置）
-4. 打开 Claude Code，说"帮我打开百度搜索 MCP 教程"
+2. （推荐）运行 `node dist/index.js --doctor` 诊断环境
+3. 关闭所有 Chrome 窗口，运行 `scripts/launch-chrome.bat`（Windows）
+4. 在 Claude Code 配置中添加 MCP Server（见上方 JSON 配置）
+5. 打开 Claude Code，说"帮我打开百度搜索 MCP 教程"
 
-**9 个工具：** navigate（导航）、snapshot（页面结构）、click（点击）、type（输入）、press_key（按键）、screenshot（截图）、extract（提取文本）、scroll（滚动）、fill（填写表单）
+**14 个工具：** navigate（导航）、snapshot（页面结构扫描）、click（点击）、type（输入）、press_key（按键）、screenshot（截图）、extract（提取文本）、scroll（滚动）、fill（填写表单）、go_back（后退）、go_forward（前进）、reload（刷新）、hover（悬停）、wait_for_text（等待文本出现）
+
+**故障排除：** 如果 CDP 连接失败，运行 `--doctor` 诊断，最常见的原因是 Chrome 启动时没带 `--remote-debugging-port` 参数。
