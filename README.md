@@ -1,9 +1,9 @@
 # 🖥️ MCP-RealBrowser
 
-> **Connect AI to your REAL browser — not a blank test window.**
+> **A persistent browser profile for your AI — log in once, sessions stay forever.**
 >
-> Your logins, cookies, extensions, and sessions all stay intact.
-> Claude Code sees what you see, clicks what you click.
+> No more blank browser windows. No more "please copy-paste this page."
+> Give your AI a dedicated browser identity, and it remembers everything.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue)](https://www.typescriptlang.org/)
@@ -14,17 +14,15 @@
 
 ## Why this exists
 
-Every existing MCP browser tool launches a **fresh, blank browser**:
+Every existing MCP browser tool launches a **fresh, blank browser** that forgets everything when closed:
 
 | Tool | Problem |
 |------|---------|
-| `@playwright/mcp` | New incognito window — no logins, no cookies |
+| `@playwright/mcp` | New incognito window, temporary profile — lost on restart |
 | `browser-use` | Python-only, doesn't speak MCP |
 | `stagehand` | Data extraction focus, not general browsing |
 
-**MCP-RealBrowser** connects to your *already-running* Chrome via CDP.
-You're logged into Twitter, Gmail, Taobao, your company CRM?
-The AI sees all of that. No re-login. No captcha hell. No "please copy-paste this".
+**MCP-RealBrowser** gives your AI a **persistent browser profile** — same directory, same cookies, same sessions across restarts. Log into GitHub, Gmail, Bilibili once, and it stays logged in forever.
 
 ---
 
@@ -199,11 +197,12 @@ screenshot(format="jpeg", quality=40) — compact visual check
 ```
 
 Key design decisions:
-- **CDP over launching**: Connects to YOUR browser, not a fresh one
-- **DOM snapshot for vision**: Structured, fast, 250-element limit keeps context manageable
+- **Persistent profile**: Browser data saved to `%LOCALAPPDATA%\mcp-realbrowser\` — cookies, logins, localStorage survive browser restarts
+- **CDP attach (not launch)**: Uses `connectOverCDP` — the browser process lives independently from the MCP server
+- **DOM snapshot for vision**: Structured element scan, 250-element limit keeps context manageable
 - **Screenshot as fallback**: For visual pages where DOM structure isn't enough
 - **Disconnect ≠ Close**: Shutting down the MCP server never closes your browser
-- **--doctor mode**: Diagnose Chrome/CDP issues before starting the server
+- **--doctor mode**: Diagnose and auto-fix browser/CDP issues before starting the server
 
 ---
 
@@ -303,9 +302,9 @@ If this is useful, a ⭐ on GitHub makes a big difference — it tells others th
 
 ### 中文说明
 
-**MCP-RealBrowser** 是一个 MCP 服务器，让 AI 助手（Claude Code、Cursor 等）连接你**真实的 Chrome 浏览器**进行操作，保留所有登录态、Cookie、插件。
+**MCP-RealBrowser** 是一个 MCP 服务器，为 AI 助手（Claude Code、Cursor 等）提供**持久化的浏览器身份**。登录一次 GitHub、Gmail、B 站，Cookies 永久保存，关了再开登录态还在。
 
-**与现有方案的区别：** Playwright MCP / Browser-Use / Stagehand 都会启动全新的空白浏览器——没有登录状态。MCP-RealBrowser 通过 CDP 协议直连你正在使用的 Chrome。
+**与现有方案的区别：** Playwright MCP 每次启动临时 profile，关闭即销毁。MCP-RealBrowser 使用固定持久目录 `%LOCALAPPDATA%\mcp-realbrowser\browser-profile`，登录态跨重启保留。
 
 **两种使用方式：**
 
