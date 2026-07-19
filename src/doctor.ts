@@ -5,7 +5,7 @@
  * Run: npx tsx src/index.ts --doctor
  */
 
-import { execSync } from "child_process";
+import { execSync, spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import http from "http";
@@ -434,84 +434,96 @@ export async function runDoctor(opts?: { fix?: boolean }): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 async function autoFix(checks: CheckResult[]): Promise<boolean> {
-  // 1. Kill all Chrome/Edge/Brave processes
+  // 1. Kill each browser individually — better error reporting
   console.log("   Killing browser processes...");
-  try {
-    if (process.platform === "win32") {
-      execSync("taskkill /F /IM msedge.exe 2>NUL & taskkill /F /IM chrome.exe 2>NUL", { timeout: 5000 });
-      execSync("taskkill /F /IM msedge.exe 2>NUL", { timeout: 5000 });
-      execSync("taskkill /F /IM brave.exe 2>NUL", { timeout: 5000 });
-    } else {
-      execSync('pkill -f "Google Chrome" 2>/dev/null; pkill -f "Microsoft Edge" 2>/dev/null; pkill -f "Brave Browser" 2>/dev/null', { timeout: 5000 });
+  const procs = process.platform === "win32"
+    ? ["msedge.exe", "chrome.exe", "brave.exe"]
+    : ["Google Chrome", "Microsoft Edge", "Brave Browser"];
+
+  let killed = 0;
+  for (const name of procs) {
+    try {
+      if (process.platform === "win32") {
+        execSync(`taskkill /F /IM ${name} 2>NUL`, { timeout: 3000 });
+      } else {
+        execSync(`pkill -f "${name}" 2>/dev/null`, { timeout: 3000 });
+      }
+      killed++;
+    } catch {
+      // wasn't running — fine
     }
-    console.log("   ✅ Browser processes terminated.");
-  } catch {
-    // It's OK if no processes were running
+  }
+  if (killed > 0) {
+    console.log(`   ✅ Killed ${killed} browser type(s).`);
+  } else {
     console.log("   (no browser processes to kill)");
   }
 
-  // Wait for processes to fully exit
-  await new Promise((r) => setTimeout(r, 1000));
+  // Give killed processes time to fully exit
+  await new Promise((r) => setTimeout(r, killed > 0 ? 1500 : 500));
 
-  // 2. Find an installed browser and launch it with CDP
+  // 2. Launch browser using spawn with detached:true (NOT execSync "start")
   const { paths } = getChromePaths();
   let launched = false;
 
   for (const browserPath of paths) {
     if (!fs.existsSync(browserPath)) continue;
 
-    console.log(`   Launching: ${browserPath}`);
+    const name = path.basename(browserPath);
+    console.log(`   Launching: ${name}`);
     try {
-      const escapedPath = browserPath.replace(/"/g, '\\"');
-      if (process.platform === "win32") {
-        // Use cmd.exe start to detach the process
-        execSync(
-          `start "" "${escapedPath}" --remote-debugging-port=${CDP_PORT} --no-first-run --no-default-browser-check`,
-          { timeout: 5000, windowsHide: true }
-        );
-      } else {
-        execSync(
-          `"${escapedPath}" --remote-debugging-port=${CDP_PORT} --no-first-run --no-default-browser-check &`,
-          { timeout: 5000 }
-        );
-      }
+      // Must use a separate user-data-dir — CDP is blocked on default profile
+      const profileDir = path.join(
+        process.env.LOCALAPPDATA || process.env.HOME || "/tmp",
+        "mcp-realbrowser",
+        "browser-profile"
+      );
+      fs.mkdirSync(profileDir, { recursive: true });
+
+      const child = spawn(
+        browserPath,
+        [
+          `--remote-debugging-port=${CDP_PORT}`,
+          `--user-data-dir=${profileDir}`,
+          "--no-first-run",
+          "--no-default-browser-check",
+          // Disable Edge's Startup Boost — it auto-restarts and steals the CDP flag
+          "--disable-features=msEdgeStartupBoost",
+        ],
+        { detached: true, stdio: "ignore", windowsHide: true }
+      );
+      child.unref(); // don't block on it
       launched = true;
-      console.log(`   ✅ Browser launched with CDP port ${CDP_PORT}.`);
+      console.log(`   ✅ ${name} launched (PID ${child.pid}).`);
       break;
     } catch (e: any) {
-      console.log(`   ⚠️  Failed to launch: ${e.message}`);
-      continue;
+      console.log(`   ⚠️  Failed to launch ${name}: ${e.message}`);
     }
   }
 
   if (!launched) {
-    console.log(`   ❌ Could not auto-launch any browser.`);
-    console.log(`   Manual: Run scripts/launch-chrome.bat or scripts/launch-edge.bat`);
+    const script = getDefaultBrowser() === "edge" ? "launch-edge.bat" : "launch-chrome.bat";
+    console.log(`   ❌ Could not auto-launch. Run: scripts/${script}`);
     return false;
   }
 
-  // 3. Wait for CDP to become available
+  // 3. Poll CDP port with retries (max 15s — Edge can be slow on first launch)
   console.log(`   Waiting for CDP port ${CDP_PORT}...`);
-  for (let i = 0; i < 10; i++) {
-    await new Promise((r) => setTimeout(r, 1000));
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setTimeout(r, 500));
     try {
-      await new Promise<void>((resolve, reject) => {
-        const req = http.get(
-          `http://localhost:${CDP_PORT}/json/version`,
-          { timeout: 2000 },
-          () => resolve()
-        );
-        req.on("error", reject);
-        req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
-      });
-      console.log(`   ✅ CDP port ${CDP_PORT} is ready.`);
-      return true;
+      const result = await checkCDPPort();
+      if (result.pass) {
+        console.log(`   ✅ CDP ready after ${((i + 1) * 0.5).toFixed(0)}s.`);
+        return true;
+      }
     } catch {
-      // still waiting
+      // not ready yet
     }
+    if (i % 4 === 3) process.stderr.write(".");
   }
 
-  console.log(`   ⚠️  CDP port not responding after 10s. The browser may need a moment.`);
-  console.log(`   Run: curl http://localhost:${CDP_PORT}/json/version to verify.`);
-  return true; // browser was launched, just might need more time
+  console.log(`\n   ⚠️  CDP not responding after 15s. It may still be starting.`);
+  console.log(`   Verify: curl http://localhost:${CDP_PORT}/json/version`);
+  return true; // browser was launched at least
 }

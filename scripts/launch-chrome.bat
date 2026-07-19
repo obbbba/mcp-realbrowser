@@ -39,14 +39,22 @@ if %CHROME%=="" (
 )
 
 echo.
-echo Starting YOUR Chrome with remote debugging on port 9222...
-echo (Your logins, cookies, and extensions are all preserved)
+echo Starting Chrome with remote debugging on port 9222...
+echo.
+echo NOTE: Chrome requires a separate profile for CDP.
+echo Your profile is saved at: %LOCALAPPDATA%\mcp-realbrowser\browser-profile
+echo Log in once, and it'll be remembered forever.
 echo.
 
-REM NO --user-data-dir = uses your REAL Chrome profile
-start "" %CHROME% --remote-debugging-port=9222
+REM Create persistent profile dir for CDP use
+set PROFILE_DIR=%LOCALAPPDATA%\mcp-realbrowser\browser-profile
+if not exist "%PROFILE_DIR%" mkdir "%PROFILE_DIR%"
+
+start "" %CHROME% --remote-debugging-port=9222 --user-data-dir="%PROFILE_DIR%" --no-first-run --no-default-browser-check
 
 echo ✅ Chrome started! Now Claude Code can connect.
+echo.
+echo First time? Log into your sites — cookies will persist.
 echo.
 echo Run: node dist/index.js --doctor   (to verify)
 echo Then restart Claude Code and say "open github.com"
