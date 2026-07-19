@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm:*)",
+      "Bash(npx:*)",
+      "Bash(git:*)",
+      "Bash(mkdir:*)",
+      "Bash(tasklist:*)",
+      "Bash(taskkill:*)",
+      "Bash(curl:*)",
+      "Bash(sleep:*)",
+      "Bash(echo:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(cd:*)",
+      "Bash(cmd.exe:*)",
+      "Bash(node:*)",
+      "Bash(npx tsx:*)",
+      "Read(D:/claude-work/mcp-realbrowser/**)",
+      "Write(D:/claude-work/mcp-realbrowser/**)",
+      "Edit(D:/claude-work/mcp-realbrowser/**)",
+      "Glob(D:/claude-work/mcp-realbrowser/**)",
+      "Grep(D:/claude-work/mcp-realbrowser/**)",
+      "WebSearch",
+      "WebFetch"
+    ]
+  },
+  "mcpServers": {
+    "realbrowser": {
+      "command": "npx",
+      "args": ["tsx", "D:/claude-work/mcp-realbrowser/src/index.ts"],
+      "env": {
+        "CDP_PORT": "9222"
+      }
+    }
+  }
+}

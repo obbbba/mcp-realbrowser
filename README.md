@@ -31,16 +31,15 @@ The AI sees all of that. No re-login. No captcha hell. No "please copy-paste thi
 ## What it does
 
 ```
-You: "Check my latest unread emails and summarize them"
-AI:  navigate(gmail.com)  →  snapshot()  →  extract()  →  summary
+You: "Check my unread emails and summarize them"
+AI:  navigate(gmail.com) → snapshot() → extract() → reads & summarizes
 
-You: "Find a flight to Tokyo next Friday under ¥3000"
-AI:  navigate(ctrip.com)  →  fill("出发", "上海")  →  fill("到达", "东京")
-     →  click("搜索")  →  extract()  →  sorted results
+You: "Find flights to Tokyo next Friday under ¥3000"
+AI:  navigate(ctrip.com) → fill("出发", "上海") → fill("到达", "东京")
+     → click("搜索") → extract() → sorted results
 
-You: "Buy the thing in my Taobao cart"
-AI:  navigate(taobao.com)  →  click("购物车")  →  snapshot()  →  click("结算")
-     →  fill + click through checkout
+You: "Open my GitHub and tell me how many stars I have"
+AI:  navigate(github.com/obbbba) → snapshot() → "You have 1 star"
 ```
 
 ---
@@ -50,35 +49,33 @@ AI:  navigate(taobao.com)  →  click("购物车")  →  snapshot()  →  click(
 ### 1. Install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/mcp-realbrowser.git
+git clone https://github.com/obbbba/mcp-realbrowser.git
 cd mcp-realbrowser
 npm install
 npm run build
 ```
 
-### 2. Diagnose (optional but recommended)
+### 2. Run diagnostics
 
 ```bash
-npm run build
 node dist/index.js --doctor
 ```
 
-This checks: Chrome installed? Running with CDP? Port available? Gives specific fix instructions for each issue.
+Checks: Node.js, dependencies, Chrome installed, Chrome running, CDP port open, debug flag enabled.
 
-### 3. Launch Chrome with debugging
+### 3. Launch Chrome with debug port
 
-**Windows:**
-```bat
-scripts\launch-chrome.bat
-```
+> ⚠️ **Close ALL Chrome windows first** (including system tray). Chrome must be launched with `--remote-debugging-port=9222` — otherwise the AI can't connect.
 
-**Mac / Linux:**
+**Windows:** Double-click `scripts\launch-chrome.bat`
+
+**Mac/Linux:**
 ```bash
 chmod +x scripts/launch-chrome.sh
 ./scripts/launch-chrome.sh
 ```
 
-Or manually:
+**Or manually:**
 ```bash
 # Mac
 /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
@@ -90,48 +87,54 @@ Or manually:
 google-chrome --remote-debugging-port=9222
 ```
 
-### 4. Configure Claude Code
+### 4. Choose your mode
 
-Add to your Claude Code MCP config (`~/.claude/claude.json` or project `.claude/settings.json`):
+#### Mode A: MCP Server (recommended — Claude Code auto-control)
 
-```json
-{
-  "mcpServers": {
-    "realbrowser": {
-      "command": "node",
-      "args": ["D:/claude-work/mcp-realbrowser/dist/index.js"],
-      "env": {
-        "CDP_PORT": "9222"
-      }
-    }
-  }
-}
-```
+Add to `.claude/settings.json` in your project:
 
-Or during development:
 ```json
 {
   "mcpServers": {
     "realbrowser": {
       "command": "npx",
-      "args": ["tsx", "D:/claude-work/mcp-realbrowser/src/index.ts"],
-      "env": {
-        "CDP_PORT": "9222"
-      }
+      "args": ["tsx", "/path/to/mcp-realbrowser/src/index.ts"],
+      "env": { "CDP_PORT": "9222" }
     }
   }
 }
 ```
 
-### 5. Use it
-
-Start Claude Code and try:
+Restart Claude Code. Now you can just talk:
 ```
-> Navigate to github.com and find the top trending TypeScript repos
-> Open Baidu and search for "MCP protocol tutorial"
-> Go to my Gmail and check unread messages
+> Go to baidu.com and search for "MCP tutorial"
+> Open GitHub trending page and find the top TypeScript repo
+> Navigate to my Gmail and summarize unread emails
 ```
 
+#### Mode B: Direct API (for scripts / custom tools)
+
+```ts
+import { CDPConnection } from "mcp-realbrowser";
+
+const browser = new CDPConnection();
+await browser.connect("http://localhost:9222");
+
+await browser.navigate("github.com");
+const snapshot = await browser.snapshot(); // AI sees the page
+await browser.click("Sign in");
+await browser.type("hello");
+const screenshot = await browser.screenshot();
+
+await browser.disconnect(); // Chrome stays open
+```
+
+### 5. Verify it works
+
+```bash
+npx tsx src/smoke-test.ts
+# Expected: 🎉 13/13 passed, 0 failed
+```
 ---
 
 ## Tools (14)
@@ -245,13 +248,17 @@ chrome --remote-debugging-port=9222 --user-data-dir="%TEMP%\chrome-mcp-profile"
 
 ## Contributing
 
-Pull requests welcome! This is a young project — there's plenty to improve.
+Pull requests welcome! Areas you can help:
+- **New tools** — want `drag_and_drop` or `select_option`? PR it.
+- **Bug fixes** — found an edge case? Fix it.
+- **Docs** — better examples, translations, tutorials.
+- **Tests** — more coverage for edge cases.
 
 1. Fork it
 2. Create your feature branch (`git checkout -b feature/amazing`)
-3. Commit your changes (`git commit -m 'Add something amazing'`)
-4. Push to the branch (`git push origin feature/amazing`)
-5. Open a Pull Request
+3. Run the smoke test: `npx tsx src/smoke-test.ts` — should be 13/13
+4. Commit (`git commit -m 'Add something amazing'`)
+5. Push + open a Pull Request
 
 ---
 
@@ -263,7 +270,7 @@ MIT © 2024
 
 ## Star History
 
-If you find this useful, a ⭐ on GitHub helps a ton — it tells others this project is worth their time.
+If this is useful, a ⭐ on GitHub makes a big difference — it tells others the project is worth their time.
 
 ---
 
@@ -271,17 +278,31 @@ If you find this useful, a ⭐ on GitHub helps a ton — it tells others this pr
 
 ### 中文说明
 
-**MCP-RealBrowser** 是一个 MCP 服务器，让 AI 助手（Claude Code、Cursor 等）连接你**真实的 Chrome 浏览器**进行操作。
+**MCP-RealBrowser** 是一个 MCP 服务器，让 AI 助手（Claude Code、Cursor 等）连接你**真实的 Chrome 浏览器**进行操作，保留所有登录态、Cookie、插件。
 
-与现有方案的区别：其他工具会启动一个全新的空白浏览器窗口——没有登录状态、没有 Cookie、没有插件。而 MCP-RealBrowser 通过 CDP 协议连接你正在使用的 Chrome，保留所有登录会话。
+**与现有方案的区别：** Playwright MCP / Browser-Use / Stagehand 都会启动全新的空白浏览器——没有登录状态。MCP-RealBrowser 通过 CDP 协议直连你正在使用的 Chrome。
 
-**快速开始：**
-1. 克隆项目 → `npm install` → `npm run build`
-2. （推荐）运行 `node dist/index.js --doctor` 诊断环境
-3. 关闭所有 Chrome 窗口，运行 `scripts/launch-chrome.bat`（Windows）
-4. 在 Claude Code 配置中添加 MCP Server（见上方 JSON 配置）
-5. 打开 Claude Code，说"帮我打开百度搜索 MCP 教程"
+**两种使用方式：**
 
-**14 个工具：** navigate（导航）、snapshot（页面结构扫描）、click（点击）、type（输入）、press_key（按键）、screenshot（截图）、extract（提取文本）、scroll（滚动）、fill（填写表单）、go_back（后退）、go_forward（前进）、reload（刷新）、hover（悬停）、wait_for_text（等待文本出现）
+**A. MCP Server 模式（推荐）：**
+1. `git clone https://github.com/obbbba/mcp-realbrowser.git` → `npm install` → `npm run build`
+2. `node dist/index.js --doctor` 诊断环境
+3. 关闭所有 Chrome 窗口，运行 `scripts/launch-chrome.bat`
+4. 在 `.claude/settings.json` 中配置 MCP Server（见上方 JSON）
+5. 重启 Claude Code，直接说"帮我打开百度搜索 MCP 教程"
 
-**故障排除：** 如果 CDP 连接失败，运行 `--doctor` 诊断，最常见的原因是 Chrome 启动时没带 `--remote-debugging-port` 参数。
+**B. 直接 API 模式：**
+```ts
+import { CDPConnection } from "mcp-realbrowser";
+const browser = new CDPConnection();
+await browser.connect("http://localhost:9222");
+await browser.navigate("github.com");
+await browser.click("Sign in");
+await browser.disconnect();
+```
+
+**验证安装：** `npx tsx src/smoke-test.ts` → 🎉 13/13 通过
+
+**14 个工具：** navigate / snapshot / click / type / press_key / screenshot / extract / scroll / fill / go_back / go_forward / reload / hover / wait_for_text
+
+**故障排除：** 运行 `--doctor` 诊断。最常见的问题：Chrome 启动时没带 `--remote-debugging-port=9222` 参数。
