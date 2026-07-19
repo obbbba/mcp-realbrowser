@@ -63,9 +63,9 @@ Checks: Node.js, dependencies, Chrome installed, Chrome running, CDP port open, 
 
 ### 3. Launch your browser with debug port
 
-> ⚠️ **Close ALL browser windows first** (including system tray). The browser must be launched with `--remote-debugging-port=9222`.
+> The browser uses a **separate persistent profile** — your daily browser isn't affected.
 
-**Windows (Edge — recommended, pre-installed on Win11):**
+**Windows (Edge — pre-installed on Win11):**
 ```bat
 scripts\launch-edge.bat
 ```
@@ -79,18 +79,6 @@ scripts\launch-chrome.bat
 ```bash
 chmod +x scripts/launch-chrome.sh
 ./scripts/launch-chrome.sh
-```
-
-**Or manually:**
-```bash
-# Mac
-/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
-
-# Windows
-"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
-
-# Linux
-google-chrome --remote-debugging-port=9222
 ```
 
 ### 4. Choose your mode
@@ -181,10 +169,10 @@ screenshot(format="jpeg", quality=40) — compact visual check
 ## Architecture
 
 ```
-┌──────────────┐     stdio (MCP)     ┌──────────────────┐     CDP (ws)     ┌──────────────┐
-│  Claude Code │ ◄────────────────► │  MCP-RealBrowser  │ ◄──────────────► │  Your Chrome │
-│  (AI Agent)  │   JSON-RPC 2.0     │  (TypeScript)     │   DevTools Proto │  (real data) │
-└──────────────┘                    └──────────────────┘                  └──────────────┘
+┌──────────────┐     stdio (MCP)     ┌──────────────────┐     CDP (ws)     ┌──────────────────┐
+│  Claude Code │ ◄────────────────► │  MCP-RealBrowser  │ ◄──────────────► │  Browser profile │
+│  (AI Agent)  │   JSON-RPC 2.0     │  (TypeScript)     │   DevTools Proto │  (persistent)    │
+└──────────────┘                    └──────────────────┘                  └──────────────────┘
                                            │
                                            │  chromium.connectOverCDP()
                                            │  DOM snapshot (interactive elements)
@@ -208,50 +196,37 @@ Key design decisions:
 
 ## Troubleshooting
 
-### "CDP port not accepting connections" (most common)
+### "CDP port not accepting connections"
 
-This means Chrome is running but **without** the `--remote-debugging-port` flag.
+The browser isn't running with the debugging flag.
 
-**Fix:**
+**Quick fix:**
 ```bash
-# 1. Kill ALL Chrome processes (yes, all of them — system tray too)
-# Windows:
-taskkill /F /IM chrome.exe
-
-# Mac:
-pkill -f "Google Chrome"
-
-# 2. Re-launch with the debugging flag
-scripts/launch-chrome.bat   # Windows
-./scripts/launch-chrome.sh  # Mac/Linux
-
-# 3. Verify the port is open
-curl http://localhost:9222/json/version
-```
-
-### "What port is my Chrome on?"
-
-Run `--doctor` to diagnose all common issues:
-```bash
-node dist/index.js --doctor
-
-# NEW: auto-fix — kills stale browsers and launches with debug flag
+# One command to diagnose and auto-fix
 node dist/index.js --doctor --fix
 ```
 
-### Blank page / no content
-
-Some sites block automation. Try:
-1. Use `screenshot` instead of `snapshot` for visual pages
-2. Use `extract` for text-heavy pages
-3. Some SPAs need `wait_for_text` after navigation
-
-### Chrome starts but ignores the flag
-
-Chrome may pick up an existing session. Use a separate profile:
+**Or manually:**
 ```bash
-chrome --remote-debugging-port=9222 --user-data-dir="%TEMP%\chrome-mcp-profile"
+# 1. Kill stale browser processes
+taskkill /F /IM msedge.exe & taskkill /F /IM chrome.exe
+
+# 2. Run the launch script
+scripts\launch-edge.bat   # Windows (Edge)
+scripts\launch-chrome.bat # Windows (Chrome)
+./scripts/launch-chrome.sh # Mac/Linux
 ```
+
+### Other issues
+
+Run `--doctor` for a full diagnostic report:
+```bash
+node dist/index.js --doctor
+```
+
+### First time? Log in to your sites
+
+The profile is empty on first launch. Log into GitHub, Gmail, Bilibili, etc. once — cookies are saved to `%LOCALAPPDATA%\mcp-realbrowser\browser-profile` and persist forever.
 
 ---
 
@@ -265,8 +240,6 @@ chrome --remote-debugging-port=9222 --user-data-dir="%TEMP%\chrome-mcp-profile"
 | Arc | ✅ Full | Chromium-based |
 | Opera | ✅ Full | Chromium-based |
 | 360 / QQ / Sogou | ⚠️ Likely | Chromium-based, not tested |
-| Firefox | 🔜 Phase 2 | Via WebDriver BiDi |
-| Safari | 🔜 Phase 3 | macOS only |
 
 ---
 
@@ -302,18 +275,17 @@ If this is useful, a ⭐ on GitHub makes a big difference — it tells others th
 
 ### 中文说明
 
-**MCP-RealBrowser** 是一个 MCP 服务器，为 AI 助手（Claude Code、Cursor 等）提供**持久化的浏览器身份**。登录一次 GitHub、Gmail、B 站，Cookies 永久保存，关了再开登录态还在。
+**MCP-RealBrowser** 是一个 MCP 服务器，为 AI 助手提供**持久化的浏览器身份**。独立 profile 不影响你的日常浏览器。登录一次 GitHub、B 站、Gmail——Cookies 永久保存到 `%LOCALAPPDATA%\mcp-realbrowser\browser-profile`，关了再开登录态还在。
 
-**与现有方案的区别：** Playwright MCP 每次启动临时 profile，关闭即销毁。MCP-RealBrowser 使用固定持久目录 `%LOCALAPPDATA%\mcp-realbrowser\browser-profile`，登录态跨重启保留。
+**与现有方案的区别：** Playwright MCP 每次启动临时 profile，关闭即销毁。我们用固定持久目录，登录态跨会话保留。
 
 **两种使用方式：**
 
 **A. MCP Server 模式（推荐）：**
-1. `git clone https://github.com/obbbba/mcp-realbrowser.git` → `npm install` → `npm run build`
-2. `node dist/index.js --doctor` 诊断环境
-3. 关闭所有 Chrome 窗口，运行 `scripts/launch-chrome.bat`
-4. 在 `.claude/settings.json` 中配置 MCP Server（见上方 JSON）
-5. 重启 Claude Code，直接说"帮我打开百度搜索 MCP 教程"
+1. `git clone` → `npm install` → `npm run build`
+2. `node dist/index.js --doctor --fix` 一键诊断并启动浏览器
+3. 在 `.claude/settings.json` 中配置 MCP Server
+4. 重启 Claude Code，直接说话
 
 **B. 直接 API 模式：**
 ```ts
@@ -325,8 +297,8 @@ await browser.click("Sign in");
 await browser.disconnect();
 ```
 
-**验证安装：** `npx tsx src/smoke-test.ts` → 🎉 13/13 通过
+**验证：** `npx tsx src/smoke-test.ts`
 
-**14 个工具：** navigate / snapshot / click / type / press_key / screenshot / extract / scroll / fill / go_back / go_forward / reload / hover / wait_for_text
+**20 个工具：** navigate / snapshot / click / type / press_key / screenshot / extract / scroll / fill / select_option / go_back / go_forward / reload / hover / wait_for_text / list_tabs / select_tab / new_tab / close_tab / reconnect
 
-**故障排除：** 运行 `--doctor` 诊断。最常见的问题：Chrome 启动时没带 `--remote-debugging-port=9222` 参数。
+**故障排除：** `--doctor --fix` 自动检测并修复。支持 Edge / Chrome / Brave / Arc / Opera / Vivaldi / Chromium，自动读取系统默认浏览器。
