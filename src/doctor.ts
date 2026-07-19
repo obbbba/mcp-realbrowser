@@ -8,6 +8,7 @@
 import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
+import http from "http";
 
 const CDP_PORT = parseInt(process.env.CDP_PORT || "9222", 10);
 
@@ -128,8 +129,6 @@ function checkBrowserRunning(): CheckResult {
 }
 
 async function checkCDPPort(): Promise<CheckResult> {
-  const http = require("http");
-
   return new Promise<CheckResult>((resolve) => {
     const req = http.get(
       `http://localhost:${CDP_PORT}/json/version`,
@@ -216,10 +215,12 @@ function checkNodeVersion(): CheckResult {
 
 function checkProjectDeps(): CheckResult {
   try {
-    // Check if we can resolve the MCP SDK
-    require.resolve("@modelcontextprotocol/sdk");
-    require.resolve("playwright");
-    require.resolve("zod");
+    // Check key dependencies exist in node_modules
+    const deps = ["@modelcontextprotocol/sdk", "playwright-core", "zod"];
+    for (const dep of deps) {
+      const p = path.join(process.cwd(), "node_modules", dep);
+      if (!fs.existsSync(p)) throw new Error(`Missing: ${dep}`);
+    }
 
     return {
       label: "Dependencies",
@@ -289,8 +290,16 @@ function checkChromeFlagConflicts(): CheckResult {
 // Public API
 // ---------------------------------------------------------------------------
 
-export async function runDoctor(): Promise<boolean> {
-  console.log("🩺 MCP-RealBrowser Doctor\n");
+export async function runDoctor(opts?: { fix?: boolean }): Promise<boolean> {
+  const fixMode = opts?.fix ?? false;
+
+  if (fixMode) {
+    console.log("🔧 MCP-RealBrowser Doctor --fix\n");
+    console.log("   Auto-fix mode: will kill stale browsers and launch a new one.\n");
+  } else {
+    console.log("🩺 MCP-RealBrowser Doctor\n");
+    console.log(`   Tip: run with --fix to auto-kill and re-launch Chrome.\n`);
+  }
   console.log(`   Platform: ${process.platform} ${process.arch}`);
   console.log(`   CDP Port: ${CDP_PORT}\n`);
   console.log("─".repeat(55));
@@ -305,6 +314,7 @@ export async function runDoctor(): Promise<boolean> {
   ];
 
   let passCount = 0;
+  let needsFix = false;
 
   for (const check of checks) {
     const icon = check.pass ? "✅" : "❌";
@@ -312,6 +322,7 @@ export async function runDoctor(): Promise<boolean> {
     console.log(`    ${check.detail.replace(/\n/g, "\n    ")}`);
     if (check.fix && !check.pass) {
       console.log(`\n   🔧 Fix:\n    ${check.fix.replace(/\n/g, "\n    ")}`);
+      needsFix = true;
     }
     if (check.pass) passCount++;
   }
@@ -320,13 +331,114 @@ export async function runDoctor(): Promise<boolean> {
   console.log(`\n📊 ${passCount}/${checks.length} checks passed.`);
 
   const allPass = passCount === checks.length;
+
+  // ── Auto-fix mode ──────────────────────────────────────────────────────
+  if (fixMode && !allPass) {
+    console.log("\n🔧 Running auto-fix...\n");
+    const fixed = await autoFix(checks);
+    if (fixed) {
+      console.log("\n✨ Auto-fix applied! Re-run --doctor to verify.\n");
+      return true;
+    }
+    console.log("\n⚠️  Auto-fix could not resolve all issues. See manual fixes above.\n");
+    return false;
+  }
+
   if (allPass) {
     console.log("\n✨ All checks passed! Ready to start MCP-RealBrowser.\n");
   } else {
     console.log(
-      "\n⚠️  Some checks failed. Fix the issues above, then re-run --doctor.\n"
+      "\n⚠️  Some checks failed. Fix the issues above, then re-run --doctor.\n" +
+      "   Or run --doctor --fix to auto-kill and re-launch the browser.\n"
     );
   }
 
   return allPass;
+}
+
+// ---------------------------------------------------------------------------
+// Auto-fix: kill stale browser processes and launch a fresh one
+// ---------------------------------------------------------------------------
+
+async function autoFix(checks: CheckResult[]): Promise<boolean> {
+  // 1. Kill all Chrome/Edge/Brave processes
+  console.log("   Killing browser processes...");
+  try {
+    if (process.platform === "win32") {
+      execSync("taskkill /F /IM chrome.exe 2>NUL", { timeout: 5000 });
+      execSync("taskkill /F /IM msedge.exe 2>NUL", { timeout: 5000 });
+      execSync("taskkill /F /IM brave.exe 2>NUL", { timeout: 5000 });
+    } else {
+      execSync('pkill -f "Google Chrome" 2>/dev/null; pkill -f "Microsoft Edge" 2>/dev/null; pkill -f "Brave Browser" 2>/dev/null', { timeout: 5000 });
+    }
+    console.log("   ✅ Browser processes terminated.");
+  } catch {
+    // It's OK if no processes were running
+    console.log("   (no browser processes to kill)");
+  }
+
+  // Wait for processes to fully exit
+  await new Promise((r) => setTimeout(r, 1000));
+
+  // 2. Find an installed browser and launch it with CDP
+  const { paths } = getChromePaths();
+  let launched = false;
+
+  for (const browserPath of paths) {
+    if (!fs.existsSync(browserPath)) continue;
+
+    console.log(`   Launching: ${browserPath}`);
+    try {
+      const escapedPath = browserPath.replace(/"/g, '\\"');
+      if (process.platform === "win32") {
+        // Use cmd.exe start to detach the process
+        execSync(
+          `start "" "${escapedPath}" --remote-debugging-port=${CDP_PORT} --no-first-run --no-default-browser-check`,
+          { timeout: 5000, windowsHide: true }
+        );
+      } else {
+        execSync(
+          `"${escapedPath}" --remote-debugging-port=${CDP_PORT} --no-first-run --no-default-browser-check &`,
+          { timeout: 5000 }
+        );
+      }
+      launched = true;
+      console.log(`   ✅ Browser launched with CDP port ${CDP_PORT}.`);
+      break;
+    } catch (e: any) {
+      console.log(`   ⚠️  Failed to launch: ${e.message}`);
+      continue;
+    }
+  }
+
+  if (!launched) {
+    console.log(`   ❌ Could not auto-launch any browser.`);
+    console.log(`   Manual: Run scripts/launch-chrome.bat or scripts/launch-edge.bat`);
+    return false;
+  }
+
+  // 3. Wait for CDP to become available
+  console.log(`   Waiting for CDP port ${CDP_PORT}...`);
+  for (let i = 0; i < 10; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const req = http.get(
+          `http://localhost:${CDP_PORT}/json/version`,
+          { timeout: 2000 },
+          () => resolve()
+        );
+        req.on("error", reject);
+        req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
+      });
+      console.log(`   ✅ CDP port ${CDP_PORT} is ready.`);
+      return true;
+    } catch {
+      // still waiting
+    }
+  }
+
+  console.log(`   ⚠️  CDP port not responding after 10s. The browser may need a moment.`);
+  console.log(`   Run: curl http://localhost:${CDP_PORT}/json/version to verify.`);
+  return true; // browser was launched, just might need more time
 }

@@ -1,0 +1,7 @@
+src/
+.claude/
+.github/
+*.tsbuildinfo
+.env
+.DS_Store
+Thumbs.db

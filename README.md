@@ -141,28 +141,42 @@ await browser.disconnect(); // Chrome stays open
 
 ```bash
 npx tsx src/smoke-test.ts
-# Expected: 🎉 13/13 passed, 0 failed
+# Expected: test runs pass
 ```
 ---
 
-## Tools (14)
+## Tools (20)
 
 | Tool | What it does |
 |------|-------------|
 | `navigate(url)` | Open any URL in the current tab |
-| `snapshot()` | Scan page DOM — returns all interactive elements with roles and labels |
+| `snapshot(query?)` | Get interactive elements — filter with `query` to save tokens |
 | `click(target)` | Click by CSS selector, text, role, placeholder, or label (6 strategies) |
 | `type(text)` | Type into the focused input with human-like delay |
 | `press_key(key)` | Press Enter, Tab, Escape, arrows, etc. |
-| `screenshot()` | Take a viewport screenshot (PNG, base64) |
-| `extract()` | Get all visible text (up to 15K chars) |
+| `screenshot(format?, quality?)` | Take a viewport screenshot (PNG/JPEG, quality 10-100 for JPEG) |
+| `extract(maxChars?)` | Get visible text (default 3K chars, max 30K) |
 | `scroll(direction, amount?)` | Scroll up/down, returns scroll position |
 | `fill(field, value)` | Fill an input by placeholder or label |
+| `select_option(target, value)` | Select an option in a `<select>` dropdown |
 | `go_back()` | Navigate back in browser history |
 | `go_forward()` | Navigate forward in browser history |
 | `reload()` | Reload the current page |
 | `hover(target)` | Hover over an element (dropdowns, tooltips) |
 | `wait_for_text(text, timeout?)` | Wait for text to appear after an action |
+| `list_tabs()` | List all open browser tabs with index, URL, and title |
+| `select_tab(index)` | Switch to a tab by index |
+| `new_tab(url?)` | Open a new browser tab |
+| `close_tab(index)` | Close a tab by index |
+| `reconnect()` | Reconnect to browser after restart |
+
+### 💡 Token-saving tips
+
+```
+snapshot(query="login")    — only elements matching "login"
+extract(maxChars=500)      — small snippets, not full pages
+screenshot(format="jpeg", quality=40) — compact visual check
+```
 
 ---
 
@@ -221,6 +235,9 @@ curl http://localhost:9222/json/version
 Run `--doctor` to diagnose all common issues:
 ```bash
 node dist/index.js --doctor
+
+# NEW: auto-fix — kills stale browsers and launches with debug flag
+node dist/index.js --doctor --fix
 ```
 
 ### Blank page / no content

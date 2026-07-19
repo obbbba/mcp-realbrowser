@@ -1,16 +1,17 @@
 import { chromium, Browser, BrowserContext, Page } from "playwright";
 
 /**
- * Manages a CDP connection to a running Chrome instance.
+ * CDP connection to a running Chrome/Edge/Brave browser instance.
  *
- * Chrome must be launched with --remote-debugging-port=9222
- * This preserves ALL user state: cookies, localStorage, sessions, extensions.
+ * Chrome must be launched with --remote-debugging-port=9222.
+ * All user state preserved: cookies, localStorage, sessions, extensions.
  */
 export class CDPConnection {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   private page: Page | null = null;
   private connected = false;
+  private cdpEndpoint: string | null = null;
 
   // ---------------------------------------------------------------------------
   // Lifecycle
@@ -18,6 +19,7 @@ export class CDPConnection {
 
   async connect(cdpEndpoint: string): Promise<void> {
     if (this.connected) return;
+    this.cdpEndpoint = cdpEndpoint;
 
     try {
       this.browser = await chromium.connectOverCDP(cdpEndpoint);
@@ -35,18 +37,13 @@ export class CDPConnection {
 
       this.connected = true;
       console.error(
-        `[realbrowser] ✅ Connected to Chrome at ${cdpEndpoint}`
-      );
-      console.error(
-        `[realbrowser] 📄 Active page: ${this.page.url() || "about:blank"}`
+        `[realbrowser] ✅ Connected (${pages.length} tab(s), active: ${this.page.url() || "about:blank"})`
       );
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       throw new Error(
         `Failed to connect to Chrome at ${cdpEndpoint}. ` +
-          `Is Chrome running with --remote-debugging-port? ` +
-          `Run: scripts/launch-chrome.bat (Windows) or scripts/launch-chrome.sh (Mac/Linux)\n` +
-          `Details: ${msg}`
+          `Is Chrome running with --remote-debugging-port? Details: ${msg}`
       );
     }
   }
@@ -61,7 +58,33 @@ export class CDPConnection {
         // browser may already be gone
       }
     }
+    this.browser = null;
+    this.context = null;
+    this.page = null;
     this.connected = false;
+  }
+
+  /** Returns the stored CDP endpoint, or null if never connected. */
+  getEndpoint(): string | null {
+    return this.cdpEndpoint;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tool: reconnect — re-attach after browser restart
+  // ---------------------------------------------------------------------------
+
+  async reconnect(cdpEndpoint?: string): Promise<string> {
+    const endpoint = cdpEndpoint || this.cdpEndpoint;
+    if (!endpoint) {
+      throw new Error("No CDP endpoint available. Navigate first or call connect().");
+    }
+
+    // Force-detach from any stale connection, then re-connect
+    await this.disconnect();
+    this.cdpEndpoint = endpoint;
+    await this.connect(endpoint);
+    const p = this.page; // may be set by connect()
+    return `Reconnected to ${endpoint}.${p ? ` Active: ${p.url()}` : ""}`;
   }
 
   // ---------------------------------------------------------------------------
@@ -69,7 +92,7 @@ export class CDPConnection {
   // ---------------------------------------------------------------------------
 
   private async ensurePage(): Promise<Page> {
-    if (!this.context) throw new Error("Not connected to browser");
+    if (!this.context) throw new Error("Not connected to browser. Use reconnect if browser was restarted.");
 
     // If current page was closed, pick another or create new
     if (this.page && this.page.isClosed()) {
@@ -89,6 +112,123 @@ export class CDPConnection {
     }
 
     return this.page;
+  }
+
+  /**
+   * Find a page by flat index across all contexts.
+   * Returns {page, context} or throws if index is out of range.
+   */
+  private async getPageByIndex(index: number): Promise<{ page: Page; context: BrowserContext }> {
+    if (!this.browser) throw new Error("Not connected to browser.");
+
+    const contexts = this.browser.contexts();
+    let offset = 0;
+    for (const ctx of contexts) {
+      const pages = ctx.pages();
+      if (index >= offset && index < offset + pages.length) {
+        return { page: pages[index - offset], context: ctx };
+      }
+      offset += pages.length;
+    }
+
+    const total = offset;
+    throw new Error(
+      `Tab index ${index} out of range (${total} tab(s) total, valid: 0–${total - 1}). ` +
+        `Use list_tabs to see available tabs.`
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tool: list_tabs
+  // ---------------------------------------------------------------------------
+
+  async listTabs(): Promise<{ index: number; url: string; title: string }[]> {
+    if (!this.browser) throw new Error("Not connected to browser.");
+
+    const result: { index: number; url: string; title: string }[] = [];
+    let idx = 0;
+    for (const ctx of this.browser.contexts()) {
+      for (const p of ctx.pages()) {
+        try {
+          result.push({
+            index: idx,
+            url: p.url() || "about:blank",
+            title: (await p.title()) || "(untitled)",
+          });
+        } catch {
+          result.push({ index: idx, url: "about:blank", title: "(unavailable)" });
+        }
+        idx++;
+      }
+    }
+    return result;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tool: select_tab
+  // ---------------------------------------------------------------------------
+
+  async selectTab(index: number): Promise<string> {
+    const { page, context } = await this.getPageByIndex(index);
+    this.page = page;
+    this.context = context;
+    await page.bringToFront();
+    return `Switched to tab ${index}: "${await page.title()}" (${page.url()})`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tool: new_tab
+  // ---------------------------------------------------------------------------
+
+  async newTab(url?: string): Promise<string> {
+    if (!this.context) throw new Error("Not connected to browser.");
+
+    const newPage = await this.context.newPage();
+    this.page = newPage;
+
+    if (url) {
+      if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+      await newPage.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    }
+
+    return `New tab opened: ${newPage.url()}`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tool: close_tab
+  // ---------------------------------------------------------------------------
+
+  async closeTab(index: number): Promise<string> {
+    const { page } = await this.getPageByIndex(index);
+
+    // Count total pages — don't close the last tab
+    let total = 0;
+    if (this.browser) {
+      for (const ctx of this.browser.contexts()) {
+        total += ctx.pages().length;
+      }
+    }
+
+    const title = await page.title().catch(() => "unknown");
+    const url = page.url();
+
+    if (total <= 1) {
+      // Last tab: open a blank one first so browser doesn't close
+      if (this.context) {
+        const blank = await this.context.newPage();
+        this.page = blank;
+      }
+    }
+
+    await page.close();
+
+    // If we closed the current page, switch to another
+    if (this.context) {
+      const remaining = this.context.pages();
+      this.page = remaining.length > 0 ? remaining[remaining.length - 1] : null;
+    }
+
+    return `Closed tab ${index}: "${title}" (${url})`;
   }
 
   // ---------------------------------------------------------------------------
@@ -116,7 +256,7 @@ export class CDPConnection {
   // Tool: snapshot — AI's "eyes" via DOM scan
   // ---------------------------------------------------------------------------
 
-  async snapshot(): Promise<string> {
+  async snapshot(query?: string): Promise<string> {
     const page = await this.ensurePage();
 
     const url = page.url();
@@ -231,19 +371,28 @@ export class CDPConnection {
         results.push(`${roleStr}${sel}${labelStr}${value}${checked}${hrefStr}${offScreen}`);
       }
 
-      return results.slice(0, 250); // reasonable limit for context window
+      return results;
     });
+
+    // Apply query filter if provided (server-side)
+    let filtered = elements;
+    if (query) {
+      const q = query.toLowerCase();
+      filtered = elements.filter((e) => e.toLowerCase().includes(q));
+    }
+
+    const limited = filtered.slice(0, 250);
 
     const lines: string[] = [
       `URL: ${url}`,
       `Title: ${title}`,
-      `Elements: ${elements.length}`,
+      `Elements: ${limited.length}${query ? ` (filtered by "${query}")` : ""}`,
       `─`.repeat(60),
-      ...elements,
+      ...limited,
     ];
 
-    if (elements.length >= 250) {
-      lines.push("... (truncated — scroll or narrow your request for more)");
+    if (filtered.length > 250) {
+      lines.push(`... (${filtered.length - 250} more elements — narrow your search or use query parameter)`);
     }
 
     return lines.join("\n");
@@ -297,7 +446,6 @@ export class CDPConnection {
     for (const strategy of strategies) {
       try {
         await strategy.fn();
-        // Small wait for any UI reaction
         await page.waitForTimeout(300);
         return `${strategy.name}: "${target}"`;
       } catch {
@@ -306,8 +454,7 @@ export class CDPConnection {
     }
 
     throw new Error(
-      `Could not click "${target}". Tried: CSS selector, text match, button, link, placeholder, label. ` +
-        `Try running 'snapshot' first to see what elements are on the page.`
+      `Could not click "${target}". Run 'snapshot' first to see available elements.`
     );
   }
 
@@ -335,15 +482,23 @@ export class CDPConnection {
   // Tool: screenshot
   // ---------------------------------------------------------------------------
 
-  async screenshot(): Promise<{ data: string; mimeType: string }> {
+  async screenshot(options?: {
+    format?: "png" | "jpeg";
+    quality?: number;
+  }): Promise<{ data: string; mimeType: string }> {
     const page = await this.ensurePage();
+    const format = options?.format || "png";
+    const quality = format === "jpeg" ? (options?.quality ?? 80) : undefined;
+
     const buffer = await page.screenshot({
-      type: "png",
+      type: format,
       fullPage: false,
+      ...(quality !== undefined ? { quality } : {}),
     });
+
     return {
       data: buffer.toString("base64"),
-      mimeType: "image/png",
+      mimeType: `image/${format}`,
     };
   }
 
@@ -351,18 +506,18 @@ export class CDPConnection {
   // Tool: extract
   // ---------------------------------------------------------------------------
 
-  async extract(): Promise<string> {
+  async extract(maxChars: number = 3000): Promise<string> {
     const page = await this.ensurePage();
     const text = await page.evaluate(() => {
       const body = document.body;
       if (!body) return "";
-      // Prefer innerText (human-visible text only, respects CSS display)
       return body.innerText;
     });
 
-    const truncated = text.substring(0, 15000);
-    if (text.length > 15000) {
-      return truncated + `\n\n... (truncated, ${text.length} chars total)`;
+    const limit = Math.min(maxChars, 30000); // hard cap at 30K
+    const truncated = text.substring(0, limit);
+    if (text.length > limit) {
+      return truncated + `\n\n... (truncated at ${limit}, ${text.length} chars total. Increase maxChars for more.)`;
     }
     return truncated;
   }
@@ -373,7 +528,9 @@ export class CDPConnection {
 
   async scroll(direction: "up" | "down", amount?: number): Promise<string> {
     const page = await this.ensurePage();
-    const delta = amount || (direction === "down" ? 600 : -600);
+    const delta = direction === "down"
+      ? (amount || 600)
+      : -(amount || 600);
     await page.evaluate((d) => {
       window.scrollBy({ top: d, behavior: "smooth" });
     }, delta);
@@ -424,11 +581,9 @@ export class CDPConnection {
       {
         name: "CSS selector",
         fn: async () => {
-          // Ensure only one visible element matched
           const loc = page.locator(target);
           const count = await loc.count();
           if (count === 0) throw new Error("no match");
-          // Use the first visible one
           await loc.first().hover({ timeout: 5000 });
         },
       },
@@ -466,8 +621,8 @@ export class CDPConnection {
     throw new Error(
       `Could not hover "${target}". ` +
         (currentUrl.startsWith("chrome://")
-          ? `Current page (${currentUrl}) is a protected Chrome page — navigate to a website first.`
-          : `Try 'snapshot' to see available elements on ${currentUrl}.`)
+          ? `Current page is a protected Chrome page — navigate to a website first.`
+          : `Try 'snapshot' to see available elements.`)
     );
   }
 
@@ -489,20 +644,18 @@ export class CDPConnection {
       return `Text "${text}" appeared after ${elapsed}ms`;
     } catch {
       throw new Error(
-        `Timed out after ${timeoutMs}ms waiting for text: "${text}". ` +
-          `Current page: ${page.url()}`
+        `Timed out after ${timeoutMs}ms waiting for text: "${text}". Current page: ${page.url()}`
       );
     }
   }
 
   // ---------------------------------------------------------------------------
-  // Tool: fill_form (batch fill multiple fields)
+  // Tool: fill
   // ---------------------------------------------------------------------------
 
   async fillField(placeholder: string, value: string): Promise<string> {
     const page = await this.ensurePage();
 
-    // Try placeholder match first, then label match
     try {
       const input = page.getByPlaceholder(placeholder);
       await input.fill(value);
@@ -514,10 +667,60 @@ export class CDPConnection {
         return `Filled "${placeholder}" = "${value}"`;
       } catch {
         throw new Error(
-          `Could not find input field matching "${placeholder}". ` +
-            `Try 'snapshot' to see available fields.`
+          `Could not find input field matching "${placeholder}". Try 'snapshot' to see available fields.`
         );
       }
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tool: select_option
+  // ---------------------------------------------------------------------------
+
+  async selectOption(target: string, value: string): Promise<string> {
+    const page = await this.ensurePage();
+
+    const strategies: Array<{ name: string; fn: () => Promise<void> }> = [
+      {
+        name: "placeholder",
+        fn: async () => {
+          await page.getByPlaceholder(target).selectOption({ label: value });
+        },
+      },
+      {
+        name: "label",
+        fn: async () => {
+          await page.getByLabel(target).selectOption({ label: value });
+        },
+      },
+      {
+        name: "CSS selector",
+        fn: async () => {
+          // Try select by value first, then by label
+          const select = page.locator(target);
+          const count = await select.count();
+          if (count === 0) throw new Error("no match");
+          try {
+            await select.selectOption(value);
+          } catch {
+            await select.selectOption({ label: value });
+          }
+        },
+      },
+    ];
+
+    for (const strategy of strategies) {
+      try {
+        await strategy.fn();
+        await page.waitForTimeout(200);
+        return `${strategy.name}: "${target}" → "${value}"`;
+      } catch {
+        continue;
+      }
+    }
+
+    throw new Error(
+      `Could not select "${value}" in "${target}". Try 'snapshot' to see <select> fields on the page.`
+    );
   }
 }
