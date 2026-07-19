@@ -23,10 +23,11 @@ interface CheckResult {
 // Default browser detection (reads OS preference)
 // ---------------------------------------------------------------------------
 
-function getDefaultBrowser(): "edge" | "chrome" | "brave" | "unknown" {
+type BrowserId = "edge" | "chrome" | "brave" | "arc" | "opera" | "vivaldi" | "chromium" | "unknown";
+
+function getDefaultBrowser(): BrowserId {
   if (process.platform === "win32") {
     try {
-      // Read Windows default browser from registry
       const result = execSync(
         'reg query "HKCU\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\http\\UserChoice" /v ProgId 2>NUL',
         { encoding: "utf-8", timeout: 3000 }
@@ -35,9 +36,10 @@ function getDefaultBrowser(): "edge" | "chrome" | "brave" | "unknown" {
       if (lower.includes("msedge")) return "edge";
       if (lower.includes("chrome")) return "chrome";
       if (lower.includes("brave")) return "brave";
-    } catch {
-      // Fall through
-    }
+      if (lower.includes("opera")) return "opera";
+      if (lower.includes("vivaldi")) return "vivaldi";
+      if (lower.includes("arc")) return "arc";
+    } catch { /* fall through */ }
   }
 
   if (process.platform === "darwin") {
@@ -47,27 +49,28 @@ function getDefaultBrowser(): "edge" | "chrome" | "brave" | "unknown" {
         { encoding: "utf-8", timeout: 3000 }
       );
       const lower = result.toLowerCase();
+      if (lower.includes("arc")) return "arc";
       if (lower.includes("chrome")) return "chrome";
       if (lower.includes("edge")) return "edge";
       if (lower.includes("brave")) return "brave";
-    } catch {
-      // Fall through
-    }
+      if (lower.includes("opera")) return "opera";
+      if (lower.includes("vivaldi")) return "vivaldi";
+    } catch { /* fall through */ }
   }
 
-  // Linux: check xdg-settings
+  // Linux
   try {
     const result = execSync("xdg-settings get default-web-browser 2>/dev/null", {
-      encoding: "utf-8",
-      timeout: 3000,
+      encoding: "utf-8", timeout: 3000,
     });
     const lower = result.toLowerCase();
     if (lower.includes("chrome") || lower.includes("chromium")) return "chrome";
-    if (lower.includes("edge")) return "edge";
     if (lower.includes("brave")) return "brave";
-  } catch {
-    // Fall through
-  }
+    if (lower.includes("edge")) return "edge";
+    if (lower.includes("opera")) return "opera";
+    if (lower.includes("vivaldi")) return "vivaldi";
+    if (lower.includes("arc")) return "arc";
+  } catch { /* fall through */ }
 
   return "unknown";
 }
@@ -76,58 +79,93 @@ function getDefaultBrowser(): "edge" | "chrome" | "brave" | "unknown" {
 // Browser install paths (ordered by OS default preference)
 // ---------------------------------------------------------------------------
 
-function getChromePaths(): { os: string; paths: string[] } {
-  const defaultBrowser = getDefaultBrowser();
+// All known Chromium-based browsers with their install paths per platform
+const KNOWN_BROWSERS: Array<{
+  id: BrowserId;
+  name: string;
+  win: string[];
+  mac: string[];
+  linux: string[];
+}> = [
+  {
+    id: "edge", name: "Edge",
+    win: [
+      "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+      "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+    ],
+    mac: ["/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"],
+    linux: ["/usr/bin/microsoft-edge"],
+  },
+  {
+    id: "chrome", name: "Chrome",
+    win: [
+      "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+    ],
+    mac: ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"],
+    linux: ["/usr/bin/google-chrome", "/usr/bin/chromium-browser", "/usr/bin/chromium"],
+  },
+  {
+    id: "brave", name: "Brave",
+    win: [
+      "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
+      path.join(process.env.LOCALAPPDATA || "", "BraveSoftware\\Brave-Browser\\Application\\brave.exe"),
+    ],
+    mac: ["/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"],
+    linux: ["/usr/bin/brave-browser"],
+  },
+  {
+    id: "arc", name: "Arc",
+    win: [],
+    mac: ["/Applications/Arc.app/Contents/MacOS/Arc"],
+    linux: [],
+  },
+  {
+    id: "opera", name: "Opera",
+    win: [
+      "C:\\Program Files\\Opera\\opera.exe",
+      path.join(process.env.LOCALAPPDATA || "", "Programs\\Opera\\opera.exe"),
+    ],
+    mac: ["/Applications/Opera.app/Contents/MacOS/Opera"],
+    linux: ["/usr/bin/opera"],
+  },
+  {
+    id: "vivaldi", name: "Vivaldi",
+    win: [
+      "C:\\Program Files\\Vivaldi\\Application\\vivaldi.exe",
+      path.join(process.env.LOCALAPPDATA || "", "Vivaldi\\Application\\vivaldi.exe"),
+    ],
+    mac: ["/Applications/Vivaldi.app/Contents/MacOS/Vivaldi"],
+    linux: ["/usr/bin/vivaldi"],
+  },
+  {
+    id: "chromium", name: "Chromium",
+    win: [
+      path.join(process.env.LOCALAPPDATA || "", "Chromium\\Application\\chrome.exe"),
+    ],
+    mac: [],
+    linux: ["/usr/bin/chromium-browser", "/usr/bin/chromium"],
+  },
+];
 
-  if (process.platform === "win32") {
-    // Put the user's default browser first
-    const all: string[] = [];
-    if (defaultBrowser === "edge") {
-      all.push("C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe");
-      all.push("C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe");
-    }
-    if (defaultBrowser === "chrome") {
-      all.push("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe");
-      all.push("C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe");
-      all.push(path.join(process.env.LOCALAPPDATA || "", "Google\\Chrome\\Application\\chrome.exe"));
-    }
-    if (defaultBrowser === "brave") {
-      all.push(path.join(process.env.LOCALAPPDATA || "", "BraveSoftware\\Brave-Browser\\Application\\brave.exe"));
-    }
-    // Then add the rest as fallbacks
-    if (defaultBrowser !== "edge") {
-      all.push("C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe");
-      all.push("C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe");
-    }
-    if (defaultBrowser !== "chrome") {
-      all.push("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe");
-      all.push("C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe");
-      all.push(path.join(process.env.LOCALAPPDATA || "", "Google\\Chrome\\Application\\chrome.exe"));
-    }
-    if (defaultBrowser !== "brave") {
-      all.push(path.join(process.env.LOCALAPPDATA || "", "BraveSoftware\\Brave-Browser\\Application\\brave.exe"));
-    }
-    return { os: "Windows", paths: all };
-  } else if (process.platform === "darwin") {
-    return {
-      os: "macOS",
-      paths: [
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-        "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-      ],
-    };
-  } else {
-    return {
-      os: "Linux",
-      paths: [
-        "/usr/bin/google-chrome",
-        "/usr/bin/chromium-browser",
-        "/usr/bin/chromium",
-        "/usr/bin/microsoft-edge",
-      ],
-    };
+function getChromePaths(): { os: string; paths: string[] } {
+  const defaultId = getDefaultBrowser();
+  const platform = process.platform === "win32" ? "win" : process.platform === "darwin" ? "mac" : "linux";
+
+  // Default browser first, then the rest
+  const ordered = [...KNOWN_BROWSERS].sort((a, b) => {
+    if (a.id === defaultId) return -1;
+    if (b.id === defaultId) return 1;
+    return 0;
+  });
+
+  const allPaths: string[] = [];
+  for (const b of ordered) {
+    const paths = platform === "win" ? b.win : platform === "mac" ? b.mac : b.linux;
+    allPaths.push(...paths);
   }
+
+  return { os: process.platform, paths: allPaths };
 }
 
 // ---------------------------------------------------------------------------
@@ -437,8 +475,8 @@ async function autoFix(checks: CheckResult[]): Promise<boolean> {
   // 1. Kill each browser individually — better error reporting
   console.log("   Killing browser processes...");
   const procs = process.platform === "win32"
-    ? ["msedge.exe", "chrome.exe", "brave.exe"]
-    : ["Google Chrome", "Microsoft Edge", "Brave Browser"];
+    ? ["msedge.exe", "chrome.exe", "brave.exe", "opera.exe", "vivaldi.exe"]
+    : ["Google Chrome", "Microsoft Edge", "Brave Browser", "Opera", "Vivaldi", "Arc"];
 
   let killed = 0;
   for (const name of procs) {
