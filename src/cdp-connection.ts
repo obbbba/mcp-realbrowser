@@ -424,7 +424,12 @@ export class CDPConnection {
       {
         name: "CSS selector",
         fn: async () => {
-          await page.hover(target, { timeout: 5000 });
+          // Ensure only one visible element matched
+          const loc = page.locator(target);
+          const count = await loc.count();
+          if (count === 0) throw new Error("no match");
+          // Use the first visible one
+          await loc.first().hover({ timeout: 5000 });
         },
       },
       {
@@ -434,9 +439,15 @@ export class CDPConnection {
         },
       },
       {
-        name: "role",
+        name: "button role",
         fn: async () => {
           await page.getByRole("button", { name: target }).hover({ timeout: 3000 });
+        },
+      },
+      {
+        name: "link role",
+        fn: async () => {
+          await page.getByRole("link", { name: target }).hover({ timeout: 3000 });
         },
       },
     ];
@@ -451,7 +462,13 @@ export class CDPConnection {
       }
     }
 
-    throw new Error(`Could not hover "${target}". Try 'snapshot' first.`);
+    const currentUrl = page.url();
+    throw new Error(
+      `Could not hover "${target}". ` +
+        (currentUrl.startsWith("chrome://")
+          ? `Current page (${currentUrl}) is a protected Chrome page — navigate to a website first.`
+          : `Try 'snapshot' to see available elements on ${currentUrl}.`)
+    );
   }
 
   // ---------------------------------------------------------------------------
