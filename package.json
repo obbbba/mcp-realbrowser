@@ -15,6 +15,7 @@
     "build": "tsc",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
+    "demo": "npx tsx src/demo.ts",
     "check": "tsc --noEmit"
   },
   "keywords": [
