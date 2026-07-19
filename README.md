@@ -63,11 +63,19 @@ node dist/index.js --doctor
 
 Checks: Node.js, dependencies, Chrome installed, Chrome running, CDP port open, debug flag enabled.
 
-### 3. Launch Chrome with debug port
+### 3. Launch your browser with debug port
 
-> ⚠️ **Close ALL Chrome windows first** (including system tray). Chrome must be launched with `--remote-debugging-port=9222` — otherwise the AI can't connect.
+> ⚠️ **Close ALL browser windows first** (including system tray). The browser must be launched with `--remote-debugging-port=9222`.
 
-**Windows:** Double-click `scripts\launch-chrome.bat`
+**Windows (Edge — recommended, pre-installed on Win11):**
+```bat
+scripts\launch-edge.bat
+```
+
+**Windows (Chrome):**
+```bat
+scripts\launch-chrome.bat
+```
 
 **Mac/Linux:**
 ```bash
@@ -235,8 +243,8 @@ chrome --remote-debugging-port=9222 --user-data-dir="%TEMP%\chrome-mcp-profile"
 
 | Browser | Support | Notes |
 |---------|---------|-------|
-| Chrome | ✅ Full | Primary target |
-| Edge | ✅ Full | Same CDP protocol |
+| Edge | ✅ Full | Pre-installed on Win11, same CDP |
+| Chrome | ✅ Full | All platforms |
 | Brave | ✅ Full | Chromium-based |
 | Arc | ✅ Full | Chromium-based |
 | Opera | ✅ Full | Chromium-based |
