@@ -5,11 +5,17 @@ echo "========================================"
 echo "  Launch Chrome with Remote Debugging"
 echo "========================================"
 echo ""
-echo "This starts Chrome with the CDP debugging port open (9222)."
-echo "MCP-RealBrowser will connect to this instance."
+echo "This opens YOUR real Chrome with all your logins,"
+echo "bookmarks, cookies, and extensions intact."
+echo "The only difference: AI can now see and control it."
 echo ""
-echo "NOTE: Close ALL existing Chrome windows first!"
+echo "⚠️  IMPORTANT: Close ALL Chrome windows first"
+echo "   (check system tray / dock too)"
 echo ""
+
+# Kill any remaining Chrome processes
+pkill -f "Google Chrome" 2>/dev/null || true
+sleep 1
 
 # Find Chrome
 CHROME=""
@@ -17,7 +23,8 @@ for path in \
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
     "/usr/bin/google-chrome" \
     "/usr/bin/chromium-browser" \
-    "/usr/bin/chromium"; do
+    "/usr/bin/chromium" \
+    "/usr/bin/microsoft-edge"; do
     if [ -x "$path" ]; then
         CHROME="$path"
         break
@@ -25,15 +32,19 @@ for path in \
 done
 
 if [ -z "$CHROME" ]; then
-    echo "ERROR: Chrome not found."
+    echo "ERROR: Chrome not found. Install from https://www.google.com/chrome/"
     exit 1
 fi
 
-echo "Starting Chrome with remote debugging on port 9222..."
-"$CHROME" \
-    --remote-debugging-port=9222 \
-    --user-data-dir="/tmp/chrome-mcp-profile" \
-    &
-
+echo "Starting YOUR Chrome with remote debugging on port 9222..."
+echo "(Your logins, cookies, and extensions are all preserved)"
 echo ""
-echo "Chrome started! Now run: npm run dev"
+
+# NO --user-data-dir = uses your REAL Chrome profile
+"$CHROME" --remote-debugging-port=9222 &
+
+sleep 2
+echo "✅ Chrome started! Now Claude Code can connect."
+echo ""
+echo "Verify:  node dist/index.js --doctor"
+echo "Then restart Claude Code and say 'open github.com'"
