@@ -20,23 +20,94 @@ interface CheckResult {
 }
 
 // ---------------------------------------------------------------------------
-// Chrome install paths
+// Default browser detection (reads OS preference)
+// ---------------------------------------------------------------------------
+
+function getDefaultBrowser(): "edge" | "chrome" | "brave" | "unknown" {
+  if (process.platform === "win32") {
+    try {
+      // Read Windows default browser from registry
+      const result = execSync(
+        'reg query "HKCU\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\http\\UserChoice" /v ProgId 2>NUL',
+        { encoding: "utf-8", timeout: 3000 }
+      );
+      const lower = result.toLowerCase();
+      if (lower.includes("msedge")) return "edge";
+      if (lower.includes("chrome")) return "chrome";
+      if (lower.includes("brave")) return "brave";
+    } catch {
+      // Fall through
+    }
+  }
+
+  if (process.platform === "darwin") {
+    try {
+      const result = execSync(
+        'defaults read com.apple.LaunchServices/com.apple.launchservices.secure LSHandlers 2>/dev/null',
+        { encoding: "utf-8", timeout: 3000 }
+      );
+      const lower = result.toLowerCase();
+      if (lower.includes("chrome")) return "chrome";
+      if (lower.includes("edge")) return "edge";
+      if (lower.includes("brave")) return "brave";
+    } catch {
+      // Fall through
+    }
+  }
+
+  // Linux: check xdg-settings
+  try {
+    const result = execSync("xdg-settings get default-web-browser 2>/dev/null", {
+      encoding: "utf-8",
+      timeout: 3000,
+    });
+    const lower = result.toLowerCase();
+    if (lower.includes("chrome") || lower.includes("chromium")) return "chrome";
+    if (lower.includes("edge")) return "edge";
+    if (lower.includes("brave")) return "brave";
+  } catch {
+    // Fall through
+  }
+
+  return "unknown";
+}
+
+// ---------------------------------------------------------------------------
+// Browser install paths (ordered by OS default preference)
 // ---------------------------------------------------------------------------
 
 function getChromePaths(): { os: string; paths: string[] } {
+  const defaultBrowser = getDefaultBrowser();
+
   if (process.platform === "win32") {
-    return {
-      os: "Windows",
-      paths: [
-        // Edge first — pre-installed on Windows 11, no extra install needed
-        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-        "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-        path.join(process.env.LOCALAPPDATA || "", "Google\\Chrome\\Application\\chrome.exe"),
-        path.join(process.env.LOCALAPPDATA || "", "BraveSoftware\\Brave-Browser\\Application\\brave.exe"),
-      ],
-    };
+    // Put the user's default browser first
+    const all: string[] = [];
+    if (defaultBrowser === "edge") {
+      all.push("C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe");
+      all.push("C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe");
+    }
+    if (defaultBrowser === "chrome") {
+      all.push("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe");
+      all.push("C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe");
+      all.push(path.join(process.env.LOCALAPPDATA || "", "Google\\Chrome\\Application\\chrome.exe"));
+    }
+    if (defaultBrowser === "brave") {
+      all.push(path.join(process.env.LOCALAPPDATA || "", "BraveSoftware\\Brave-Browser\\Application\\brave.exe"));
+    }
+    // Then add the rest as fallbacks
+    if (defaultBrowser !== "edge") {
+      all.push("C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe");
+      all.push("C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe");
+    }
+    if (defaultBrowser !== "chrome") {
+      all.push("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe");
+      all.push("C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe");
+      all.push(path.join(process.env.LOCALAPPDATA || "", "Google\\Chrome\\Application\\chrome.exe"));
+    }
+    if (defaultBrowser !== "brave") {
+      all.push(path.join(process.env.LOCALAPPDATA || "", "BraveSoftware\\Brave-Browser\\Application\\brave.exe"));
+    }
+    return { os: "Windows", paths: all };
   } else if (process.platform === "darwin") {
     return {
       os: "macOS",
@@ -302,7 +373,8 @@ export async function runDoctor(opts?: { fix?: boolean }): Promise<boolean> {
     console.log(`   Tip: run with --fix to auto-kill and re-launch browser.\n`);
   }
   console.log(`   Platform: ${process.platform} ${process.arch}`);
-  console.log(`   CDP Port: ${CDP_PORT}\n`);
+  console.log(`   CDP Port: ${CDP_PORT}`);
+  console.log(`   Default browser: ${getDefaultBrowser()}\n`);
   console.log("─".repeat(55));
 
   const checks: CheckResult[] = [
